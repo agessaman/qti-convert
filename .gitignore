@@ -4,6 +4,19 @@ tests/
 # Mac shit
 .DS_Store
 
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Word Documents
+*.docx
+*.doc
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
