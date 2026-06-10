@@ -2,6 +2,8 @@
 Microsoft Word 2007 Format
 """
 
+import random
+
 from docx import Document
 from docx.shared import Inches, Mm
 from htmldocx import HtmlToDocx
@@ -92,7 +94,48 @@ def _matching_bank_for_batch(batch_rows):
     return bank[:MATCHING_BATCH_SIZE]
 
 
-def _write_matching_table(doc, batch_rows, question_num, html_parser, split_matching):
+def _full_matching_bank(batch_rows):
+    if not batch_rows:
+        return []
+    return [
+        option
+        for option in batch_rows[0].get("options", [])
+        if option.get("display") and option.get("text")
+    ]
+
+
+def prepare_matching_batches(question, split_matching, rng):
+    """Build matching groups with a randomized word bank for each group."""
+    rows = question.get("answer", [])
+    row_batches = (
+        _split_even_batches(rows)
+        if split_matching and len(rows) > MATCHING_BATCH_SIZE
+        else [rows]
+    )
+    batches = []
+    for batch_rows in row_batches:
+        if split_matching:
+            bank = _matching_bank_for_batch(batch_rows)
+        else:
+            bank = _full_matching_bank(batch_rows)
+        bank = list(bank)
+        rng.shuffle(bank)
+        batches.append({"rows": batch_rows, "bank": bank})
+    return batches
+
+
+def _prepare_assessment_matching(assessment, split_matching, rng):
+    for question in assessment.get("question", []):
+        if question.get("question_type") == "matching_question":
+            question["_matching_batches"] = prepare_matching_batches(
+                question, split_matching, rng
+            )
+
+
+def _write_matching_table(doc, batch, question_num):
+    batch_rows = batch["rows"]
+    bank = batch["bank"]
+
     doc.add_paragraph().add_run("Matching").bold = True
 
     left_lines = []
@@ -102,14 +145,8 @@ def _write_matching_table(doc, batch_rows, question_num, html_parser, split_matc
             question_num += 1
 
     right_lines = []
-    if split_matching:
-        bank = _matching_bank_for_batch(batch_rows)
-        for oindex, option in enumerate(bank):
-            right_lines.append(f"{_option_label(oindex)}. {option['text']}")
-    elif batch_rows:
-        for oindex, option in enumerate(batch_rows[0].get("options", [])):
-            if option.get("display") and option.get("text"):
-                right_lines.append(f"{_option_label(oindex)}. {option['text']}")
+    for oindex, option in enumerate(bank):
+        right_lines.append(f"{_option_label(oindex)}. {option['text']}")
 
     table = doc.add_table(rows=1, cols=2)
     table.cell(0, 0).text = "\n".join(left_lines)
@@ -121,15 +158,12 @@ def _write_matching(doc, question, question_num, html_parser, split_matching=Fal
     if question.get("text"):
         _write_text(doc, html_parser, question["text"])
 
-    rows = question.get("answer", [])
-    batches = _split_even_batches(rows) if split_matching and len(rows) > MATCHING_BATCH_SIZE else [rows]
+    batches = question.get("_matching_batches", [])
 
-    for batch_index, batch_rows in enumerate(batches):
+    for batch_index, batch in enumerate(batches):
         if batch_index > 0:
             doc.add_paragraph()
-        question_num = _write_matching_table(
-            doc, batch_rows, question_num, html_parser, split_matching
-        )
+        question_num = _write_matching_table(doc, batch, question_num)
 
     return question_num
 
@@ -232,7 +266,88 @@ def _write_question(doc, question, question_num, html_parser, split_matching=Fal
     return _write_generic_question(doc, question, question_num, html_parser)
 
 
-def _write_assessment_content(doc, assessment, html_parser, split_matching=False):
+def _matching_key_entries(batch, question_num):
+    entries = []
+    batch_rows = batch["rows"]
+    bank = batch["bank"]
+    label_map = {option["id"]: _option_label(index) for index, option in enumerate(bank)}
+
+    for row in batch_rows:
+        if not row.get("text"):
+            continue
+        letter = None
+        for option in row.get("options", []):
+            if option.get("correct"):
+                letter = label_map.get(option["id"])
+                break
+        if letter:
+            entries.append(f"{question_num}. {letter}")
+        question_num += 1
+    return entries, question_num
+
+
+def _choice_key_entry(question, question_num):
+    labels = []
+    for index, answer in enumerate(question.get("answer", [])):
+        if answer.get("correct") and answer.get("display"):
+            labels.append(_option_label(index))
+    if not labels:
+        return None
+    return f"{question_num}. {', '.join(labels)}"
+
+
+def _text_key_entry(question, question_num):
+    texts = [
+        answer["text"]
+        for answer in question.get("answer", [])
+        if answer.get("correct") and answer.get("text")
+    ]
+    if not texts:
+        return None
+    return f"{question_num}. {', '.join(texts)}"
+
+
+def _build_answer_key_lines(assessment):
+    lines = []
+    question_num = 1
+
+    for question in assessment.get("question", []):
+        qtype = question.get("question_type")
+        if qtype == "matching_question":
+            for batch in question.get("_matching_batches", []):
+                entries, question_num = _matching_key_entries(batch, question_num)
+                lines.extend(entries)
+        elif qtype in CHOICE_QUESTION_TYPES:
+            entry = _choice_key_entry(question, question_num)
+            if entry:
+                lines.append(entry)
+            question_num += 1
+        else:
+            entry = _text_key_entry(question, question_num)
+            if entry:
+                lines.append(entry)
+            question_num += 1
+
+    return lines
+
+
+def _write_answer_key(doc, assessment):
+    lines = _build_answer_key_lines(assessment)
+    if not lines:
+        return
+
+    doc.add_page_break()
+    doc.add_heading("Answer Key", level=0)
+    doc.add_heading(_assessment_title(assessment), level=1)
+    for line in lines:
+        doc.add_paragraph(line)
+
+
+def _write_assessment_content(doc, assessment, html_parser, split_matching=False, output_key=False, rng=None):
+    if rng is None:
+        rng = random.Random()
+    _prepare_assessment_matching(assessment, split_matching, rng)
+
     doc.add_heading(_assessment_title(assessment), 0)
 
     description = assessment['metadata'].get('description') or ''
@@ -254,8 +369,11 @@ def _write_assessment_content(doc, assessment, html_parser, split_matching=False
             doc.add_paragraph()
         question_num = _write_question(doc, question, question_num, html_parser, split_matching)
 
+    if output_key:
+        _write_answer_key(doc, assessment)
 
-def write_file(data, outfile, split_matching=False):
+
+def write_file(data, outfile, split_matching=False, output_key=False, rng=None):
     doc = Document()
     doc = setup_a4(doc)
     doc = setup_metadata(doc)
@@ -263,12 +381,14 @@ def write_file(data, outfile, split_matching=False):
     html_parser = HtmlToDocx()
 
     for assessment in data['assessment']:
-        _write_assessment_content(doc, assessment, html_parser, split_matching)
+        _write_assessment_content(
+            doc, assessment, html_parser, split_matching, output_key=output_key, rng=rng
+        )
 
     doc.save(outfile)
 
 
-def write_forms(forms, outfile, combined=False, split_matching=False):
+def write_forms(forms, outfile, combined=False, split_matching=False, output_key=False, seed=None):
     doc = Document()
     doc = setup_a4(doc)
     doc = setup_metadata(doc)
@@ -276,8 +396,16 @@ def write_forms(forms, outfile, combined=False, split_matching=False):
     html_parser = HtmlToDocx()
 
     for form_index, form in enumerate(forms):
+        rng = random.Random(seed + form_index) if seed is not None else random.Random()
         for assessment in form['assessment']:
-            _write_assessment_content(doc, assessment, html_parser, split_matching)
+            _write_assessment_content(
+                doc,
+                assessment,
+                html_parser,
+                split_matching,
+                output_key=output_key,
+                rng=rng,
+            )
         if combined and form_index < len(forms) - 1:
             doc.add_page_break()
 

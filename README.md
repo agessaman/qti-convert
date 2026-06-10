@@ -57,6 +57,8 @@ python3 main.py -f docx -o quiz.docx "/path/to/export/imsmanifest.xml"
 | `--form-output` | `separate` | `separate` = one file per form; `combined` = single file with all forms |
 | `--strip-html` | off | Remove HTML tags from question and answer text |
 | `--split-matching` | off | Split matching questions into batches of ≤5 for scantron (A–E) |
+| `--output-key` | off | Append an answer key on a separate page (docx only) |
+| `--output-all` | off | With `--forms N`, include every question in each pool (ignore `selection_number`) |
 | `-v` | — | Increase log verbosity |
 | `-h`, `--help` | — | Show help |
 
@@ -99,6 +101,19 @@ python3 main.py "/Users/adam/Downloads/Comprehensive Test World History/imsmanif
 
 Each form has 54 questions drawn from 15 chapter question pools.
 
+### Answer key on a separate page
+
+```bash
+python3 main.py "/Users/adam/Downloads/Chapter 30 Test/imsmanifest.xml" \
+  -f docx \
+  --strip-html \
+  --split-matching \
+  --output-key \
+  -o Chapter30-with-key.docx
+```
+
+The test appears first; the answer key follows on a new page with entries like `1. E` for matching and `11. B` for multiple choice, using the same letter labels shown on the test.
+
 ### Combined output (all forms in one file)
 
 ```bash
@@ -121,6 +136,20 @@ python3 main.py "/Users/adam/Downloads/Comprehensive Test World History/imsmanif
 
 Produces `form-a.json`, `form-b.json`, and `form-c.json`.
 
+### Multiple forms with all pool questions
+
+Generate three shuffled forms but include every question in each pool instead of the Canvas `selection_number` limit:
+
+```bash
+python3 main.py "/Users/adam/Downloads/Chapter 30 Test/imsmanifest.xml" \
+  --forms 3 \
+  --output-all \
+  --shuffle-scope group \
+  -f docx \
+  --strip-html \
+  -o Chapter30-full.docx
+```
+
 ### Legacy export (all questions, no randomization)
 
 ```bash
@@ -137,7 +166,7 @@ Exports every question in the source file (20 for Chapter 30, 82 for Comprehensi
 - **Multiple Choice** — labeled once per question-pool section; stems numbered sequentially; options indented 0.25″ and lettered A, B, C, D, …
 - Questions flow continuously without a page break between each one
 
-**`--split-matching`** divides matching questions into even batches of at most 5 (e.g. 10 items → 5 + 5), with each batch using only A–E in the word bank for scantron bubble sheets.
+**`--split-matching`** divides matching questions into even batches of at most 5 (e.g. 10 items → 5 + 5). Each batch gets its own word bank limited to A–E, **randomized independently** for that group. Use `--seed` for reproducible bank order across runs.
 
 **`--strip-html`** is recommended for Canvas exports that embed inline HTML styling in question text.
 
@@ -148,6 +177,7 @@ Exports every question in the source file (20 for Chapter 30, 82 for Comprehensi
 | Legacy | `--forms 1` | All questions exported | Original document order |
 | Group shuffle | `--forms N` (default) | `selection_number` per Canvas question pool | Shuffle within each pool; pool order preserved |
 | Test shuffle | `--forms N --shuffle-scope test` | Same pool selection | Shuffle entire question list |
+| All pool questions | `--forms N --output-all` | All questions in each pool | Same shuffle rules as above |
 
 Form labels: Form A, Form B, … Form Z, Form AA, …
 

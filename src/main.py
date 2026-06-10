@@ -75,7 +75,7 @@ def _build_assessments(input_path, xml_resource, args):
             blocks,
             args.shuffle_scope,
             rng,
-            apply_pools=True,
+            apply_pools=not args.output_all,
         )
         form_metadata = dict(metadata)
         form_metadata["form_label"] = label
@@ -140,16 +140,25 @@ def _write_docx(forms, args):
             {"assessment": forms[0]["assessment"]},
             outfile,
             split_matching=args.split_matching,
+            output_key=args.output_key,
+            rng=_form_rng(args.seed, 0),
         )
         return
 
     if args.form_output == "combined":
         outfile = args.output or "output.docx"
         logger.info("Writing DOCX to '%s'...", outfile)
-        formats.docx.write_forms(forms, outfile, combined=True, split_matching=args.split_matching)
+        formats.docx.write_forms(
+            forms,
+            outfile,
+            combined=True,
+            split_matching=args.split_matching,
+            output_key=args.output_key,
+            seed=args.seed,
+        )
         return
 
-    for form in forms:
+    for form_index, form in enumerate(forms):
         if args.output:
             outfile = _form_output_path(args.output, form["label"], "separate")
         else:
@@ -160,6 +169,8 @@ def _write_docx(forms, args):
             {"assessment": form["assessment"]},
             outfile,
             split_matching=args.split_matching,
+            output_key=args.output_key,
+            rng=_form_rng(args.seed, form_index),
         )
 
 
@@ -222,6 +233,16 @@ if __name__ == "__main__":
         "--split-matching",
         action="store_true",
         help="Split matching questions into even batches of at most 5 for scantron (A-E).",
+    )
+    parser.add_argument(
+        "--output-key",
+        action="store_true",
+        help="Append an answer key on a separate page (docx only).",
+    )
+    parser.add_argument(
+        "--output-all",
+        action="store_true",
+        help="Include all questions in each pool when generating multiple forms (ignore selection_number).",
     )
     parser.add_argument("--version", action="version", help="Display version and exit.", version="%(prog)s (version {version})".format(version=__version__))
     parser.add_argument("-h", "--help", action="help", default=argparse.SUPPRESS, help="Show this help message and exit.")
